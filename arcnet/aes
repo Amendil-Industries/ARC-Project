@@ -419,32 +419,6 @@ function keySchedule(encKey)
 	return expKey
 end
 
--- Transform a string of bytes into 16 byte blocks, adding padding to ensure that each block contains 16 bytes.
--- For example:
--- "\xFF\xFF\xFF\xFF\xFF\xFF\xFF\xFF\xFF\xFF\xFF\xFF\xFF\xFF\xFF\xFF\xFF\xFF\xFF\xFF\xFF\xFF\xFF\xFF\xFF\xFF\xFF\xFF" (contains 28 0xFF bytes)
--- Is transformed into this:
--- {0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF}, {0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0,0,0,0} (16 0xFF bytes, followed by 12 0xFF bytes and 4 0x00 bytes for padding)
-
-local function breakIntoBlocks(data)
-	if type(data) ~= "string" then
-		error("breakIntoBlocks: data is not a string", 2)
-	end
-	while (#data % 16) ~= 0 do
-		data = data.."\0"
-	end
-	local blocks = {}
-	local blockNum = 1
-	local output = {}
-	for i=1, #data, 16 do
-		blocks[blockNum] = {}
-		for j=1, 16 do
-			blocks[blockNum][j] = string.byte(data, ((blockNum-1)*16)+j, ((blockNum-1)*16)+j)
-		end
-		blockNum = blockNum+1
-	end
-	return blocks
-end
-
 -- Transform a string into a series of blocks.
 
 -- For example, to get a key from a string:
@@ -598,27 +572,6 @@ end
 
 -- Encrypt / Decrypt bytestreams (tables of bytes):
 
--- ECB (electronic codebook) Mode (not secure, do not use):
-
-function encryptBytestreamECB(data, key)
-	local blocks = {}
-	local outputBytestream = {}
-	local expKey = keySchedule(key)
-	for i=1, #data, 16 do
-		local block = {}
-		for j=1, 16 do
-			block[j] = data[i+(j-1)] or 0
-		end
-		block = encryptBlockCustomExpKey(block, expKey)
-		for j=1, 16 do
-			table.insert(outputBytestream, block[j])
-		end
-		os.queueEvent("")
-		os.pullEvent("")
-	end
-	return outputBytestream
-end
-
 function decryptBytestreamECB(data, key)
 	local outputBytestream = {}
 	local expKey = keySchedule(key)
@@ -734,11 +687,7 @@ function encryptStr(data, key, iv)
 		table.insert(byteStream, string.byte(data, i, i))
 	end
 	local outputBytestream = {}
-	if iv then
-		outputBytestream = encryptBytestream(byteStream, key, iv)
-	else
-		outputBytestream = encryptBytestreamECB(byteStream, key)
-	end
+	outputBytestream = encryptBytestream(byteStream, key, iv)
 	local output = ""
 	for i=1, #outputBytestream do
 		output = output..string.char(outputBytestream[i])
@@ -781,9 +730,6 @@ local function incrementCTR(blk)
 end
 
 local counterModeContext = {
-	key = {},
-	ctr = {},
-	stream_cache = {}, -- Use "leftover" bytes from generate() here.
 	setKey = function(self, key)
 		if type(key) == "string" then
 			if #key < 16 then
@@ -882,9 +828,10 @@ local counterModeContext = {
 
 function newCTR(key, iv)
 	local context = {
-		stream_cache = {},
+		stream_cache = {}, -- Use "leftover" bytes from generate() here.
 		key = {},
-		iv = {},
+		ctr = {},
+		iv = iv,
 		__index = counterModeContext,
 	}
 	setmetatable(context, context)
