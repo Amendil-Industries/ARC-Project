@@ -1,5 +1,6 @@
 -- AES implementation
--- By KillaVanilla
+-- original code by: KillaVanilla
+-- modified by: Amendil
 
 local sbox = {
 [0]=0x63, 0x7C, 0x77, 0x7B, 0xF2, 0x6B, 0x6F, 0xC5, 0x30, 0x01, 0x67, 0x2B, 0xFE, 0xD7, 0xAB, 0x76,
@@ -246,27 +247,6 @@ local function invShiftRows(input)
 	return copy
 end
 
-local function finite_field_mul(a,b) -- Multiply two numbers in GF(256), assuming that polynomials are 8 bits wide
-	local product = 0
-	local mulA, mulB = a,b
-	for i=1, 8 do
-		--print("FFMul: MulA: "..mulA.." MulB: "..mulB)
-		if mulA == 0 or mulB == 0 then
-			break
-		end
-		if bit.band(1, mulB) > 0 then
-			product = bxor(product, mulA)
-		end
-		mulB = bit.brshift(mulB, 1)
-		local carry = bit.band(0x80, mulA)
-		mulA = bit.band(0xFF, bit.blshift(mulA, 1))
-		if carry > 0 then
-			mulA = bxor( mulA, 0x1B )
-		end
-	end
-	return product
-end
-
 local function mixColumn(column)
 	local output = {}
 	--print("MixColumn: #column: "..#column)
@@ -288,15 +268,7 @@ local function invMixColumn(column)
 end
 
 local function mixColumns(input, invert)
-	--print("MixColumns: #input: "..#input)
-	-- Ooops. I mixed the ROWS instead of the COLUMNS on accident.
 	local output = {}
-	--[[
-	local c1 = { input[1], input[2], input[3], input[4] }
-	local c2 = { input[5], input[6], input[7], input[8] }
-	local c3 = { input[9], input[10], input[11], input[12] }
-	local c4 = { input[13], input[14], input[15], input[16] }
-	]]
 	local c1 = { input[1], input[5], input[9], input[13] }
 	local c2 = { input[2], input[6], input[10], input[14] }
 	local c3 = { input[3], input[7], input[11], input[15] }
@@ -312,27 +284,6 @@ local function mixColumns(input, invert)
 		c3 = mixColumn(c3)
 		c4 = mixColumn(c4)
 	end
-	--[[
-	output[1] = c1[1]
-	output[2] = c1[2]
-	output[3] = c1[3]
-	output[4] = c1[4]
-	
-	output[5] = c2[1]
-	output[6] = c2[2]
-	output[7] = c2[3]
-	output[8] = c2[4]
-	
-	output[9] = c3[1]
-	output[10] = c3[2]
-	output[11] = c3[3]
-	output[12] = c3[4]
-	
-	output[13] = c4[1]
-	output[14] = c4[2]
-	output[15] = c4[3]
-	output[16] = c4[4]
-	]]
 	
 	output[1] = c1[1]
 	output[5] = c1[2]
@@ -357,17 +308,17 @@ local function mixColumns(input, invert)
 	return output
 end
 
-local function addRoundKey(input, exp_key, round)
+local function addRoundKey(input, expKey, round)
 	local output = {}
 	for i=1, 16 do
 		assert(input[i], "input["..i.."]=nil!")
-		assert(exp_key[ ((round-1)*16)+i ], "round_key["..(((round-1)*16)+i).."]=nil!")
-		output[i] = bxor( input[i], exp_key[ ((round-1)*16)+i ] )
+		assert(expKey[ ((round-1)*16)+i ], "round_key["..(((round-1)*16)+i).."]=nil!")
+		output[i] = bxor( input[i], expKey[ ((round-1)*16)+i ] )
 	end
 	return output
 end
 
-function key_schedule(enc_key)
+function keySchedule(encKey)
 	local function core(in1, in2, in3, in4, i)
 		local s1 = in2
 		local s2 = in3
@@ -380,7 +331,7 @@ function key_schedule(enc_key)
 		return s1, s2, s3, s4
 	end
 	
-	local n, b, key_type = 0, 0, 0
+	local n, b, keyType = 0, 0, 0
 	
 	-- Len | n | b |
 	-- 128 |16 |176|
@@ -389,83 +340,83 @@ function key_schedule(enc_key)
 	
 	-- Determine keysize:
 	
-	if #enc_key < 16 then
+	if #encKey < 16 then
 		error("Encryption key is too small; key size must be more than 16 bytes.")
-	elseif #enc_key >= 16 and #enc_key < 24 then
+	elseif #encKey >= 16 and #encKey < 24 then
 		n = 16
 		b = 176
-		--key_type = 1
-	elseif #enc_key >= 24 and #enc_key < 32 then
+		--keyType = 1
+	elseif #encKey >= 24 and #encKey < 32 then
 		n = 24
 		b = 208
-		--key_type = 2
+		--keyType = 2
 	else
 		n = 32
 		b = 240
-		--key_type = 3
+		--keyType = 3
 	end
 	
-	local exp_key = {}
+	local expKey = {}
 	local rcon_iter = 1
 	for i=1, n do
-		exp_key[i] = enc_key[i]
+		expKey[i] = encKey[i]
 	end
-	while #exp_key < b do
-		local t1 = exp_key[#exp_key]
-		local t2 = exp_key[#exp_key-1]
-		local t3 = exp_key[#exp_key-2]
-		local t4 = exp_key[#exp_key-3]
+	while #expKey < b do
+		local t1 = expKey[#expKey]
+		local t2 = expKey[#expKey-1]
+		local t3 = expKey[#expKey-2]
+		local t4 = expKey[#expKey-3]
 		t1, t2, t3, t4 = core(t1, t2, t3, t4, rcon_iter)
 		rcon_iter = rcon_iter+1
-		t1 = bxor(t1, exp_key[#exp_key-(n-1)])
-		t2 = bxor(t2, exp_key[#exp_key-(n-2)])
-		t3 = bxor(t3, exp_key[#exp_key-(n-3)])
-		t4 = bxor(t4, exp_key[#exp_key-(n-4)])
-		insert(exp_key, t1)
-		insert(exp_key, t2)
-		insert(exp_key, t3)
-		insert(exp_key, t4)
+		t1 = bxor(t1, expKey[#expKey-(n-1)])
+		t2 = bxor(t2, expKey[#expKey-(n-2)])
+		t3 = bxor(t3, expKey[#expKey-(n-3)])
+		t4 = bxor(t4, expKey[#expKey-(n-4)])
+		insert(expKey, t1)
+		insert(expKey, t2)
+		insert(expKey, t3)
+		insert(expKey, t4)
 		for i=1, 3 do
-			t1 = bxor(exp_key[#exp_key], exp_key[#exp_key-(n-1)])
-			t2 = bxor(exp_key[#exp_key-1], exp_key[#exp_key-(n-2)])
-			t3 = bxor(exp_key[#exp_key-2], exp_key[#exp_key-(n-3)])
-			t4 = bxor(exp_key[#exp_key-3], exp_key[#exp_key-(n-4)])
-			insert(exp_key, t1)
-			insert(exp_key, t2)
-			insert(exp_key, t3)
-			insert(exp_key, t4)
+			t1 = bxor(expKey[#expKey], expKey[#expKey-(n-1)])
+			t2 = bxor(expKey[#expKey-1], expKey[#expKey-(n-2)])
+			t3 = bxor(expKey[#expKey-2], expKey[#expKey-(n-3)])
+			t4 = bxor(expKey[#expKey-3], expKey[#expKey-(n-4)])
+			insert(expKey, t1)
+			insert(expKey, t2)
+			insert(expKey, t3)
+			insert(expKey, t4)
 		end
-		if key_type == 3 then -- If we're processing a 256 bit key...
+		if keyType == 3 then -- If we're processing a 256 bit key...
 			-- Take the previous 4 bytes of the expanded key, run them through the sbox,
 			-- then XOR them with the previous n bytes of the expanded key, then output them
 			-- as the next 4 bytes of expanded key.
-			t1 = bxor(sbox[exp_key[#exp_key]], exp_key[#exp_key-(n-1)])
-			t2 = bxor(sbox[exp_key[#exp_key-1]], exp_key[#exp_key-(n-2)])
-			t3 = bxor(sbox[exp_key[#exp_key-2]], exp_key[#exp_key-(n-3)])
-			t4 = bxor(sbox[exp_key[#exp_key-3]], exp_key[#exp_key-(n-4)])
-			insert(exp_key, t1)
-			insert(exp_key, t2)
-			insert(exp_key, t3)
-			insert(exp_key, t4)
+			t1 = bxor(sbox[expKey[#expKey]], expKey[#expKey-(n-1)])
+			t2 = bxor(sbox[expKey[#expKey-1]], expKey[#expKey-(n-2)])
+			t3 = bxor(sbox[expKey[#expKey-2]], expKey[#expKey-(n-3)])
+			t4 = bxor(sbox[expKey[#expKey-3]], expKey[#expKey-(n-4)])
+			insert(expKey, t1)
+			insert(expKey, t2)
+			insert(expKey, t3)
+			insert(expKey, t4)
 		end
-		if key_type == 2 or key_type == 3 then -- If we're processing a 192-bit or 256-bit key..
+		if keyType == 2 or keyType == 3 then -- If we're processing a 192-bit or 256-bit key..
 			local i = 2
-			if key_type == 3 then
+			if keyType == 3 then
 				i = 3
 			end
 			for j=1, i do
-				t1 = bxor(exp_key[#exp_key], exp_key[#exp_key-(n-1)])
-				t2 = bxor(exp_key[#exp_key-1], exp_key[#exp_key-(n-2)])
-				t3 = bxor(exp_key[#exp_key-2], exp_key[#exp_key-(n-3)])
-				t4 = bxor(exp_key[#exp_key-3], exp_key[#exp_key-(n-4)])
-				insert(exp_key, t1)
-				insert(exp_key, t2)
-				insert(exp_key, t3)
-				insert(exp_key, t4)
+				t1 = bxor(expKey[#expKey], expKey[#expKey-(n-1)])
+				t2 = bxor(expKey[#expKey-1], expKey[#expKey-(n-2)])
+				t3 = bxor(expKey[#expKey-2], expKey[#expKey-(n-3)])
+				t4 = bxor(expKey[#expKey-3], expKey[#expKey-(n-4)])
+				insert(expKey, t1)
+				insert(expKey, t2)
+				insert(expKey, t3)
+				insert(expKey, t4)
 			end
 		end
 	end
-	return exp_key
+	return expKey
 end
 
 -- Transform a string of bytes into 16 byte blocks, adding padding to ensure that each block contains 16 bytes.
@@ -517,131 +468,131 @@ end
 
 -- Encrypt / Decrypt individual blocks:
 
-function encrypt_block(data, key)
-	local exp_key = key_schedule(key)
+function encryptBlock(data, key)
+	local expKey = keySchedule(key)
 	local state = data
 	local nr = 0
 	
-	if #exp_key == 176 then -- Key type 1 (128-bits)
+	if #expKey == 176 then -- Key type 1 (128-bits)
 		nr = 10
-	elseif #exp_key == 208 then -- Key type 2 (192-bits)
+	elseif #expKey == 208 then -- Key type 2 (192-bits)
 		nr = 12
-	elseif #exp_key == 240 then -- Key type 3 (256-bits)
+	elseif #expKey == 240 then -- Key type 3 (256-bits)
 		nr = 14
 	else
-		error("encrypt_block: Unknown key size?", 2)
+		error("encryptBlock: Unknown key size?", 2)
 	end
 	
 	-- Inital round:
-	state = addRoundKey(state, exp_key, 1)
+	state = addRoundKey(state, expKey, 1)
 	
 	-- Repeat (Nr-1) times:
-	for round_num = 2, nr-1 do	
+	for roundNum = 2, nr-1 do	
 		state = subBytes(state)
 		state = shiftRows(state)
 		state = mixColumns(state)
-		state = addRoundKey(state, exp_key, round_num)
+		state = addRoundKey(state, expKey, roundNum)
 	end
 	
 	-- Final round (No mixColumns()):
 	state = subBytes(state)
 	state = shiftRows(state)
-	state = addRoundKey(state, exp_key, nr)
+	state = addRoundKey(state, expKey, nr)
 	return state
 end
 
-function decrypt_block(data, key)
-	local exp_key = key_schedule(key)
+function decryptBlock(data, key)
+	local expKey = keySchedule(key)
 	local state = data
 	local nr = 0
 	
-	if #exp_key == 176 then -- Key type 1 (128-bits)
+	if #expKey == 176 then -- Key type 1 (128-bits)
 		nr = 10
-	elseif #exp_key == 208 then -- Key type 2 (192-bits)
+	elseif #expKey == 208 then -- Key type 2 (192-bits)
 		nr = 12
-	elseif #exp_key == 240 then -- Key type 3 (256-bits)
+	elseif #expKey == 240 then -- Key type 3 (256-bits)
 		nr = 14
 	else
-		error("decrypt_block: Unknown key size?", 2)
+		error("decryptBlock: Unknown key size?", 2)
 	end
 	
 	-- Inital round:
-	state = addRoundKey(state, exp_key, nr)
+	state = addRoundKey(state, expKey, nr)
 	
 	-- Repeat (Nr-1) times:
-	for round_num = nr-1, 2, -1 do
+	for roundNum = nr-1, 2, -1 do
 		state = invShiftRows(state)
 		state = subBytes(state, true)
-		state = addRoundKey(state, exp_key, round_num)
+		state = addRoundKey(state, expKey, roundNum)
 		state = mixColumns(state, true)
 	end
 	
 	-- Final round (No mixColumns()):
 	state = invShiftRows(state)
 	state = subBytes(state, true)
-	state = addRoundKey(state, exp_key, 1)
+	state = addRoundKey(state, expKey, 1)
 	return state
 end
 
-function encrypt_block_customExpKey(data, exp_key--[[, key_type]]) -- Encrypt blocks, but using a precalculated expanded key instead of performing the key expansion on every step like with the normal encrypt_block(2) call
+function encryptBlockCustomExpKey(data, expKey--[[, keyType]]) -- Encrypt blocks, but using a precalculated expanded key instead of performing the key expansion on every step like with the normal encryptBlock(2) call
 	local state = data
 	local nr = 0
-	if #exp_key == 176 then -- Key type 1 (128-bits)
+	if #expKey == 176 then -- Key type 1 (128-bits)
 		nr = 10
-	elseif #exp_key == 208 then -- Key type 2 (192-bits)
+	elseif #expKey == 208 then -- Key type 2 (192-bits)
 		nr = 12
-	elseif #exp_key == 240 then -- Key type 3 (256-bits)
+	elseif #expKey == 240 then -- Key type 3 (256-bits)
 		nr = 14
 	else
-		error("encrypt_block: Unknown key size?", 2)
+		error("encryptBlock: Unknown key size?", 2)
 	end
 	
 	-- Inital round:
-	state = addRoundKey(state, exp_key, 1)
+	state = addRoundKey(state, expKey, 1)
 	
 	-- Repeat (Nr-1) times:
-	for round_num = 2, nr-1 do	
+	for roundNum = 2, nr-1 do	
 		state = subBytes(state)
 		state = shiftRows(state)
 		state = mixColumns(state)
-		state = addRoundKey(state, exp_key, round_num)
+		state = addRoundKey(state, expKey, roundNum)
 	end
 	
 	-- Final round (No mixColumns()):
 	state = subBytes(state)
 	state = shiftRows(state)
-	state = addRoundKey(state, exp_key, nr)
+	state = addRoundKey(state, expKey, nr)
 	return state
 end
 
-function decrypt_block_customExpKey(data, exp_key--[[, key_type]])
+function decryptBlockCustomExpKey(data, expKey--[[, keyType]])
 	local state = data
 	local nr = 0
-	if #exp_key == 176 then -- Key type 1 (128-bits)
+	if #expKey == 176 then -- Key type 1 (128-bits)
 		nr = 10
-	elseif #exp_key == 208 then -- Key type 2 (192-bits)
+	elseif #expKey == 208 then -- Key type 2 (192-bits)
 		nr = 12
-	elseif #exp_key == 240 then -- Key type 3 (256-bits)
+	elseif #expKey == 240 then -- Key type 3 (256-bits)
 		nr = 14
 	else
-		error("decrypt_block: Unknown key size?", 2)
+		error("decryptBlock: Unknown key size?", 2)
 	end
 	
 	-- Inital round:
-	state = addRoundKey(state, exp_key, nr)
+	state = addRoundKey(state, expKey, nr)
 	
 	-- Repeat (Nr-1) times:
-	for round_num = nr-1, 2, -1 do
+	for roundNum = nr-1, 2, -1 do
 		state = invShiftRows(state)
 		state = subBytes(state, true)
-		state = addRoundKey(state, exp_key, round_num)
+		state = addRoundKey(state, expKey, roundNum)
 		state = mixColumns(state, true)
 	end
 	
 	-- Final round (No mixColumns()):
 	state = invShiftRows(state)
 	state = subBytes(state, true)
-	state = addRoundKey(state, exp_key, 1)
+	state = addRoundKey(state, expKey, 1)
 	return state
 end
 
@@ -649,16 +600,16 @@ end
 
 -- ECB (electronic codebook) Mode (not secure, do not use):
 
-function encrypt_bytestream_ecb(data, key)
+function encryptBytestreamECB(data, key)
 	local blocks = {}
 	local outputBytestream = {}
-	local exp_key = key_schedule(key)
+	local expKey = keySchedule(key)
 	for i=1, #data, 16 do
 		local block = {}
 		for j=1, 16 do
 			block[j] = data[i+(j-1)] or 0
 		end
-		block = encrypt_block_customExpKey(block, exp_key)
+		block = encryptBlockCustomExpKey(block, expKey)
 		for j=1, 16 do
 			table.insert(outputBytestream, block[j])
 		end
@@ -668,15 +619,15 @@ function encrypt_bytestream_ecb(data, key)
 	return outputBytestream
 end
 
-function decrypt_bytestream_ecb(data, key)
+function decryptBytestreamECB(data, key)
 	local outputBytestream = {}
-	local exp_key = key_schedule(key)
+	local expKey = keySchedule(key)
 	for i=1, #data, 16 do
 		local block = {}
 		for j=1, 16 do
 			block[j] = data[i+(j-1)] or 0
 		end
-		block = decrypt_block_customExpKey(block, exp_key)
+		block = decryptBlockCustomExpKey(block, expKey)
 		for j=1, 16 do
 			table.insert(outputBytestream, block[j])
 		end
@@ -695,19 +646,19 @@ end
 
 -- CBC (cipher-block chaining) mode:
 
-function encrypt_bytestream(data, key, init_vector)
-	local blocks = { init_vector }
+function encryptBytestream(data, key, initVector)
+	local blocks = { initVector }
 	local outputBytestream = {}
-	local exp_key = key_schedule(key)
-	if not init_vector then
-		error("encrypt_bytestream: No initalization vector was passed.", 2)
+	local expKey = keySchedule(key)
+	if not initVector then
+		error("encryptBytestream: No initalization vector was passed.", 2)
 	end
 	for i=1, #data do
 		if data[i] == nil or data[i] >= 256 then
 			if type(data[i]) == "number" then
-				error("encrypt_bytestream: Invalid data at i="..i.." data[i]="..data[i], 2)
+				error("encryptBytestream: Invalid data at i="..i.." data[i]="..data[i], 2)
 			else
-				error("encrypt_bytestream: Invalid data at i="..i.." data[i]="..type(data[i]), 2)
+				error("encryptBytestream: Invalid data at i="..i.." data[i]="..type(data[i]), 2)
 			end
 		end
 	end
@@ -715,14 +666,14 @@ function encrypt_bytestream(data, key, init_vector)
 	for i=1, math.ceil(#data/16) do
 		local block = {}
 		if not blocks[i] then
-			error("encrypt_bytestream: blocks["..i.."] is nil! Input size: "..#data, 2)
+			error("encryptBytestream: blocks["..i.."] is nil! Input size: "..#data, 2)
 		end
 		for j=1, 16 do
 			block[j] = data[((i-1)*16)+j] or 0
 			block[j] = bxor(block[j], blocks[i][j]) -- XOR this block with the previous one
 		end
 		--print("#bytes: "..#block)
-		block = encrypt_block_customExpKey(block, exp_key)
+		block = encryptBlockCustomExpKey(block, expKey)
 		table.insert(blocks, block)
 		for j=1, 16 do
 			insert(outputBytestream, block[j])
@@ -736,24 +687,24 @@ function encrypt_bytestream(data, key, init_vector)
 	return outputBytestream
 end
 
-function decrypt_bytestream(data, key, init_vector)
-	local blocks = { init_vector }
+function decryptBytestream(data, key, initVector)
+	local blocks = { initVector }
 	local outputBytestream = {}
-	local exp_key = key_schedule(key)
-	if not init_vector then
-		error("decrypt_bytestream: No initalization vector was passed.", 2)
+	local expKey = keySchedule(key)
+	if not initVector then
+		error("decryptBytestream: No initalization vector was passed.", 2)
 	end
 	local s = os.clock()
 	for i=1, math.ceil(#data/16) do
 		local block = {}
 		if not blocks[i] then
-			error("decrypt_bytestream: blocks["..i.."] is nil! Input size: "..#data, 2)
+			error("decryptBytestream: blocks["..i.."] is nil! Input size: "..#data, 2)
 		end
 		for j=1, 16 do
 			block[j] = data[((i-1)*16)+j] or 0
 		end
 		table.insert(blocks, block)
-		local dec_block = decrypt_block_customExpKey(block, exp_key)
+		local dec_block = decryptBlockCustomExpKey(block, expKey)
 		for j=1, 16 do
 			dec_block[j] = bxor(dec_block[j], blocks[i][j]) -- We use XOR on the plaintext, not the ciphertext
 			table.insert(outputBytestream, dec_block[j])
@@ -777,63 +728,43 @@ end
 
 -- Encrypt / Decrypt strings:
 
-function encrypt_str(data, key, iv)
+function encryptStr(data, key, iv)
 	local byteStream = {}
 	for i=1, #data do
 		table.insert(byteStream, string.byte(data, i, i))
 	end
-	local output_bytestream = {}
+	local outputBytestream = {}
 	if iv then
-		output_bytestream = encrypt_bytestream(byteStream, key, iv)
+		outputBytestream = encryptBytestream(byteStream, key, iv)
 	else
-		output_bytestream = encrypt_bytestream_ecb(byteStream, key)
+		outputBytestream = encryptBytestreamECB(byteStream, key)
 	end
 	local output = ""
-	for i=1, #output_bytestream do
-		output = output..string.char(output_bytestream[i])
+	for i=1, #outputBytestream do
+		output = output..string.char(outputBytestream[i])
 	end
 	return output
 end
 
-function decrypt_str(data, key, iv)
+function decryptStr(data, key, iv)
 	local byteStream = {}
 	for i=1, #data do
 		table.insert(byteStream, string.byte(data, i, i))
 	end
-	local output_bytestream = {}
+	local outputBytestream = {}
 	if iv then
-		output_bytestream = decrypt_bytestream(byteStream, key, iv)
+		outputBytestream = decryptBytestream(byteStream, key, iv)
 	else
-		output_bytestream = decrypt_bytestream_ecb(byteStream, key)
+		outputBytestream = decryptBytestreamECB(byteStream, key)
 	end
 	local output = ""
-	for i=1, #output_bytestream do
-		output = output..string.char(output_bytestream[i])
+	for i=1, #outputBytestream do
+		output = output..string.char(outputBytestream[i])
 	end
 	return output
 end
 
-function davies_meyer(data, h0)
-	local last_h = h0
-    for dm_iter=1, 16 do
-        for i=1, math.ceil(#data/16) do
-            local block = {}
-            for j=1, 16 do
-                block[j] = data[((i-1)*16)+j] or 0
-            end
-            local block = encrypt_block(last_h, block)
-            for j=1, 16 do
-                block[j] = bxor(block[j], last_h[j]) -- XOR h[i-1] with h[i].
-            end
-            last_h = block
-            os.queueEvent("")
-            os.pullEvent("")
-        end
-    end
-	return last_h
-end
-
-local function increment_ctr(blk)
+local function incrementCTR(blk)
 	local cpy = {}
 	for i=1, 16 do
 		cpy[i] = blk[i] or 0
@@ -849,54 +780,54 @@ local function increment_ctr(blk)
 	return cpy
 end
 
-local counter_mode_context = {
+local counterModeContext = {
 	key = {},
 	ctr = {},
 	stream_cache = {}, -- Use "leftover" bytes from generate() here.
-	set_key = function(self, key)
+	setKey = function(self, key)
 		if type(key) == "string" then
 			if #key < 16 then
-				error("set_key: Key length ("..#key..") must be at least 16 characters!", 2)
+				error("setKey: Key length ("..#key..") must be at least 16 characters!", 2)
 			end
 			for i=1, 16 do
 				self.key[i] = string.byte(key, i, i)
 			end
 		elseif type(key) == "table" then
 			if #key < 16 then
-				error("set_key: Key length ("..#key..") must be at least 16 bytes!", 2)
+				error("setKey: Key length ("..#key..") must be at least 16 bytes!", 2)
 			end
 			for i=1, 16 do
 				if type(key[i]) ~= "number" or key[i] > 255 or key[i] < 0 then
 					if type(key[i]) == "nil" then
-						error("set_key: Value key["..i.."] is invalid: nil", 2)
+						error("setKey: Value key["..i.."] is invalid: nil", 2)
 					else
-						error("set_key: Value key["..i.."] is invalid: "..key[i], 2)
+						error("setKey: Value key["..i.."] is invalid: "..key[i], 2)
 					end
 				end
 				self.key[i] = key[i]
 			end
 		else
-			error("set_key: Key type is not supported: "..type(key), 2)
+			error("setKey: Key type is not supported: "..type(key), 2)
 		end
 	end,
-	set_ctr = function(self, ctr)
+	setCTR = function(self, ctr)
 		if type(ctr) == "string" then
 			if #ctr < 16 then
-				error("set_ctr: Counter length ("..#ctr..") must be at least 16 characters!", 2)
+				error("setCTR: Counter length ("..#ctr..") must be at least 16 characters!", 2)
 			end
 			for i=1, 16 do
 				self.ctr[i] = string.byte(ctr, i, i)
 			end
 		elseif type(ctr) == "table" then
 			if #ctr < 16 then
-				error("set_ctr: Counter length ("..#ctr..") must be at least 16 bytes!", 2)
+				error("setCTR: Counter length ("..#ctr..") must be at least 16 bytes!", 2)
 			end
 			for i=1, 16 do
 				if type(ctr[i]) ~= "number" or ctr[i] > 255 or ctr[i] < 0 then
 					if type(ctr[i]) == "nil" then
-						error("set_ctr: Value ctr["..i.."] is invalid: nil", 2)
+						error("setCTR: Value ctr["..i.."] is invalid: nil", 2)
 					else
-						error("set_ctr: Value ctr["..i.."] is invalid: "..ctr[i], 2)
+						error("setCTR: Value ctr["..i.."] is invalid: "..ctr[i], 2)
 					end
 				end
 				self.ctr[i] = ctr[i]
@@ -915,7 +846,7 @@ local counter_mode_context = {
 			self.ctr[3] = b3
 			self.ctr[4] = b4
 		else
-			error("set_ctr: Counter type is not supported: "..type(ctr), 2)
+			error("setCTR: Counter type is not supported: "..type(ctr), 2)
 		end
 	end,
 	generate = function(self, bytes)
@@ -930,14 +861,14 @@ local counter_mode_context = {
 			end
 			local blocksToGenerate = math.ceil((bytes - #genBytes) / 16)
 			for i=1, blocksToGenerate-1 do
-				self.ctr = increment_ctr(self.ctr)
-				local block = encrypt_block(self.ctr, self.key)
+				self.ctr = incrementCTR(self.ctr)
+				local block = encryptBlock(self.ctr, self.key)
 				for i=1, 16 do
 					table.insert(genBytes, block[i])
 				end
 			end
-			self.ctr = increment_ctr(self.ctr)
-			local block = encrypt_block(self.ctr, self.key)
+			self.ctr = incrementCTR(self.ctr)
+			local block = encryptBlock(self.ctr, self.key)
 			for i=1, (bytes - #genBytes) do
 				table.insert(genBytes, table.remove(block))
 			end
@@ -949,15 +880,15 @@ local counter_mode_context = {
 	end,
 }
 
-function new_ctrMode(key, iv)
+function newCTR(key, iv)
 	local context = {
 		stream_cache = {},
 		key = {},
 		iv = {},
-		__index = counter_mode_context,
+		__index = counterModeContext,
 	}
 	setmetatable(context, context)
-	context:set_key(key)
-	context:set_ctr(iv)
+	context:setKey(key)
+	context:setCTR(iv)
 	return context
 end

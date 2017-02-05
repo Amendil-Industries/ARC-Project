@@ -21,7 +21,7 @@ end
 
 local function send(self, data)
 	data = textutils.serialize({arcnet = true, data = data})
-	data = AES.encrypt_str(data, self.currentKey, self.iv)
+	data = AES.encryptStr(data, self.currentKey, self.iv)
 	self:forwardKey()
 	transmit(self.remote, data)
 end
@@ -52,7 +52,7 @@ local function receive(self, timeout)
 end
 
 local function decrypt(self, msg)
-	msg = AES.decrypt_str(msg, self.currentKey, self.iv)
+	msg = AES.decryptStr(msg, self.currentKey, self.iv)
 	msg = textutils.unserialize(msg)
 	if type(msg) ~= "table" or not msg.arcnet then
 		-- error
@@ -98,7 +98,7 @@ local function completeChannel(channel, shared)
 	local iv = channel.secret
 	while #iv < 16 do iv = iv .. channel.secret end
 	channel.iv = AES.strToBlocks(iv)[1]
-	channel.stream = AES.new_ctrMode(iv, iv)
+	channel.stream = AES.newCTR(iv, iv)
 	channel.send = send
 	channel.receive = receive
 	channel.decrypt = decrypt
