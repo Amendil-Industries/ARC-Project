@@ -1,0 +1,209 @@
+os.loadAPI("apis/bigint")
+os.loadAPI("apis/AES")
+--local class = dofile("class")
+CHANNEL_BROADCAST = 65535
+
+local modems = {}
+local channels = {}
+
+local modulus = bigint.new("63353989158107")
+local base = bigint.new("5131671")
+
+local function transmit(remote, msg)
+	for _, modem in pairs(modems) do
+		modem.transmit(remote, os.getComputerID(), msg)
+	end
+end
+
+local function forwardKey(self)
+	self.currentKey = self.stream:generate(16)
+end
+
+local function send(self, data)
+	data = textutils.serialize({arcnet = true, data = data})
+	data = AES.encrypt_str(data, self.currentKey, self.iv)
+	self:forwardKey()
+	transmit(self.remote, data)
+end
+
+local function receive(self, timeout)
+    -- Start the timer
+	local timer
+	local filter
+	if timeout then
+		timer = os.startTimer(timeout)
+	else
+		filter = "modem_message"
+	end
+
+	-- Wait for events
+	while true do
+		local event, p, port, reply, data, distance = os.pullEvent(filter)
+		-- modem message from a registered modem
+		if event == "modem_message" and modems[p] and port == os.getComputerID() and reply == self.remote then 
+			local ok, msg = self:decrypt(data)
+			if ok then
+				return msg, distance, p
+			end
+		elseif event == "timer" and p == timer then
+		    return nil
+		end
+	end
+end
+
+local function decrypt(self, msg)
+	msg = AES.decrypt_str(msg, self.currentKey, self.iv)
+	msg = textutils.unserialize(msg)
+	if type(msg) ~= "table" or not msg.arcnet then
+		-- error
+		return false
+	end
+	self:forwardKey()
+	return true, msg.data
+end
+
+local function receiveResponse(remote, timeout)
+    -- Start the timer
+	local timer
+	local filter
+	if timeout then
+		timer = os.startTimer(timeout)
+	else
+		filter = "modem_message"
+	end
+
+	-- Wait for events
+	while true do
+		local event, p, port, reply, msg = os.pullEvent(filter)
+		-- modem message from a registered modem
+		if event == "modem_message" and modems[p] and port == os.getComputerID() and reply == remote then 
+			return msg
+		elseif event == "timer" and p == timer then
+		    return nil
+		end
+	end
+end
+
+
+local function createChannel(remote)
+	local channel = {}
+	channel.remote = remote -- remote id
+	channel.private = bigint.randomWithLength(12) -- own private key for this channel
+	channel.shared = tostring(bigint.modexp(base, channel.private, modulus))
+	return channel
+end
+
+local function completeChannel(channel, shared)
+	channel.secret = tostring(bigint.modexp(shared, channel.private, modulus))
+	local iv = channel.secret
+	while #iv < 16 do iv = iv .. channel.secret end
+	channel.iv = AES.strToBlocks(iv)[1]
+	channel.stream = AES.new_ctrMode(iv, iv)
+	channel.send = send
+	channel.receive = receive
+	channel.decrypt = decrypt
+	channel.forwardKey = forwardKey
+	channel:forwardKey()
+	return channel
+end
+
+function connect(remote, timeout)
+	local channel = createChannel(remote)
+	transmit(remote, {shared = channel.shared})
+	local msg = receiveResponse(remote, timeout)
+	if msg and type(msg) == "table" and type(msg.shared) == "string" then
+		local shared = bigint.safeNew(msg.shared)
+		if shared then
+			return completeChannel(channel, shared)
+		end
+	end
+	return false
+end
+
+function listen()
+	while true do
+		local event, side, port, reply, msg = os.pullEvent("modem_message")
+		if modems[side] and port == os.getComputerID() then
+			if type(msg) == "table" then
+				if type(msg.shared) == "string" then -- some one has send us a shared key
+					local shared = bigint.safeNew(msg.shared)
+					if shared then
+						local channel = createChannel(reply)
+						completeChannel(channel, shared)
+						transmit(reply, {shared = channel.shared})
+						channels[reply] = channel
+						print("private: " .. tostring(channel.private))
+						print("shared: " .. tostring(channel.shared))
+						print("secret: " .. channel.secret)
+					end
+				end
+			elseif type(msg) == "string" then
+				local channel = channels[reply]
+				if channel then
+					local ok, data = channel:decrypt(msg)
+					if ok then
+						print(data)
+						channel:send("ok")
+					end
+				end
+			end
+		end
+	end
+end
+
+
+local function openSide(side)
+	if type(side) ~= "string" then
+		error("string expected", 3)
+	end
+	if peripheral.getType(side) ~= "modem" then	
+		error("No such modem: " .. side, 3)
+	end
+	local modem = peripheral.wrap(side)
+	modem.open(os.getComputerID())
+	modem.open(CHANNEL_BROADCAST)
+	modems[side] = modem
+end
+
+function open(...)
+	local sides = {...}
+	if #sides == 0 then -- open all
+		local count = 0
+		for _, side in ipairs({"front", "back", "left", "right", "top", "bottom"}) do
+			if peripheral.getType(side) == "modem" then
+				openSide(side)
+				count = count + 1
+			end
+		end
+		if count == 0 then
+			error("no modems found", 2)
+		end
+	end
+	for _, side in ipairs(sides) do
+		openSide(side)
+	end
+end
+
+local function closeSide(side)
+	local modem = modems[side]
+	if not modem then
+		error("No such modem: " .. side, 3)
+	end
+	modem.close(os.getComputerID())
+	modem.close(CHANNEL_BROADCAST)
+	modems[side] = nil
+end
+
+function close(...)
+	local sides = {...}
+	if #sides == 0 then -- close all
+		for _, modem in pairs(modems) do
+			modem.close(os.getComputerID())
+			modem.close(CHANNEL_BROADCAST)
+		end
+		modems = {}
+	end
+	for _, side in ipairs(sides) do
+		closeSide(side)
+	end
+end
