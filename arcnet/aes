@@ -572,31 +572,6 @@ end
 
 -- Encrypt / Decrypt bytestreams (tables of bytes):
 
-function decryptBytestreamECB(data, key)
-	local outputBytestream = {}
-	local expKey = keySchedule(key)
-	for i=1, #data, 16 do
-		local block = {}
-		for j=1, 16 do
-			block[j] = data[i+(j-1)] or 0
-		end
-		block = decryptBlockCustomExpKey(block, expKey)
-		for j=1, 16 do
-			table.insert(outputBytestream, block[j])
-		end
-		os.queueEvent("")
-		os.pullEvent("")
-	end
-	for i=#outputBytestream, 1, -1 do
-		if outputBytestream[i] ~= 0 then
-			break
-		else
-			outputBytestream[i] = nil
-		end
-	end
-	return outputBytestream
-end
-
 -- CBC (cipher-block chaining) mode:
 
 function encryptBytestream(data, key, initVector)
@@ -701,11 +676,7 @@ function decryptStr(data, key, iv)
 		table.insert(byteStream, string.byte(data, i, i))
 	end
 	local outputBytestream = {}
-	if iv then
-		outputBytestream = decryptBytestream(byteStream, key, iv)
-	else
-		outputBytestream = decryptBytestreamECB(byteStream, key)
-	end
+	outputBytestream = decryptBytestream(byteStream, key, iv)
 	local output = ""
 	for i=1, #outputBytestream do
 		output = output..string.char(outputBytestream[i])
