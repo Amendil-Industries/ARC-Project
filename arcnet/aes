@@ -689,7 +689,7 @@ local function incrementCTR(blk)
 	for i=1, 16 do
 		cpy[i] = blk[i] or 0
 	end
-	cpy[1] = cpy[1] + 1
+	cpy[1] = (cpy[1] + 1) % 256
 	for i=2, 16 do
 		if cpy[i-1] <= 255 then
 			break
