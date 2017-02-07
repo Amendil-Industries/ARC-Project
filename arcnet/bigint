@@ -399,7 +399,7 @@ local function mod(a, m)
 end
 
 local printscale = 10000000
-local printscalefmt = string.format("%%.%dd", math.log10(printscale))
+local printscalefmt = string.format("%%0%d.d", math.log10(printscale))
 local function makestr(bi, s)
 	if bi >= bigint(printscale) then
 		makestr(divint(bi, printscale), s)
@@ -408,15 +408,17 @@ local function makestr(bi, s)
 end
 
 local function biginttostring(bi)
+	local sign = ""
 	local s = {}
 	if bi < bigint(0) then
 		bi = negate(bi)
-		table.insert(s, "-")
+		--table.insert(s, "-")
+		sign = "-"
 	end
 	makestr(bi, s)
-	s = table.concat(s):gsub("^0*", "")
+	s = table.concat(s):match("0*(%d+)")--:gsub("^0*", "")
 	if s == "" then s = "0" end
-	return s
+	return sign .. s
 end
 
 local function biginttonumber(bi)
@@ -490,21 +492,17 @@ one = bigint(1)
 two = bigint(2)
 
 function modexp(base, exponent, modulus)
-	local r = 1
-
-	while true do
-		if exponent % 2 == one then
-			r = r * base % modulus
+	if modulus == 1 then return zero end
+    local result = one
+	base = base % modulus
+    while exponent > zero do
+        if exponent % 2 == one then
+           result = (result * base) % modulus
 		end
-		exponent = exponent / 2
-
-		if exponent == zero then
-			break
-		end
-		base = base * base % modulus
+        exponent = exponent / 2
+        base = (base * base) % modulus
 	end
-
-	return r
+    return result
 end
 
 function primitiveRoot(p, maxRoot)
