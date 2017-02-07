@@ -1,3 +1,20 @@
+-- Copyright (c) 2010 Ted Unangst <ted.unangst@gmail.com>
+--
+-- Permission to use, copy, modify, and distribute this software for any
+-- purpose with or without fee is hereby granted, provided that the above
+-- copyright notice and this permission notice appear in all copies.
+--
+-- THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+-- WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+-- MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
+-- ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+-- WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
+-- ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
+-- OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+--
+
+-- Modified and fixed by Amendil
+
 local function fl(x)
 	if x < 0 then
 		return math.ceil(x) + 0 -- make -0 go away
@@ -18,8 +35,7 @@ end
 local radix = 2^24 -- maybe up to 2^26 is safe?
 local radix_sqrt = fl(math.sqrt(radix))
 
-local bigintmt -- forward decl
-local bigint
+local bigintmt -- forward declarations
 
 local function alloc()
 	local bi = {}
@@ -174,7 +190,7 @@ local function sub(a, b)
 	if type(b) == "number" then
 		return addint(a, -b)
 	elseif type(a) == "number" then
-		a = bigint(a)
+		a = new(a)
 	end
 	return add(a, negate(b))
 end
@@ -208,7 +224,7 @@ local function multiply(a, b)
 		normalize(bi, true)
 	end
 	normalize(bi)
-	if bi ~= bigint(0) then
+	if bi ~= new(0) then
 		bi.sign = a.sign * b.sign
 	end
 	return bi
@@ -317,29 +333,29 @@ local function div(numer, denom)
 		end
 		return divint(numer, denom)
 	elseif type(numer) == "number" then
-		numer = bigint(numer)
+		numer = new(numer)
 	end
 	-- check signs and trivial cases
 	local sign = 1
-	local cmp = compare(denom, bigint(0))
+	local cmp = compare(denom, new(0))
 	if cmp == 0 then
 		error("divide by 0", 2)
 	elseif cmp == -1 then
 		sign = -sign
 		denom = negate(denom)
 	end
-	cmp = compare(numer, bigint(0))
+	cmp = compare(numer, new(0))
 	if cmp == 0 then
-		return bigint(0)
+		return new(0)
 	elseif cmp == -1 then
 		sign = -sign
 		numer = negate(numer)
 	end
 	cmp = compare(numer, denom)
 	if cmp == -1 then
-		return bigint(0)
+		return new(0)
 	elseif cmp == 0 then
-		return bigint(sign)
+		return new(sign)
 	end
 	local bi
 	-- if small enough, do it the easy way
@@ -382,9 +398,9 @@ end
 
 local function rem(bi, m)
 	if type(m) == "number" then
-		return bigint(intrem(bi, m))
+		return new(intrem(bi, m))
 	elseif type(bi) == "number" then
-		bi = bigint(bi)
+		bi = new(bi)
 	end
 
 	return bi - ((bi / m) * m)
@@ -398,10 +414,11 @@ local function mod(a, m)
 	return bi
 end
 
+-- the original printscalefmt and biginttostring was very buggy, therefore here is the corrected version
 local printscale = 10000000
 local printscalefmt = string.format("%%0%d.d", math.log10(printscale))
 local function makestr(bi, s)
-	if bi >= bigint(printscale) then
+	if bi >= new(printscale) then
 		makestr(divint(bi, printscale), s)
 	end
 	table.insert(s, string.format(printscalefmt, intmod(bi, printscale)))
@@ -410,13 +427,12 @@ end
 local function biginttostring(bi)
 	local sign = ""
 	local s = {}
-	if bi < bigint(0) then
+	if bi < new(0) then
 		bi = negate(bi)
-		--table.insert(s, "-")
 		sign = "-"
 	end
 	makestr(bi, s)
-	s = table.concat(s):match("0*(%d+)")--:gsub("^0*", "")
+	s = table.concat(s):match("0*(%d+)")
 	if s == "" then s = "0" end
 	return sign .. s
 end
@@ -441,7 +457,7 @@ bigintmt = {
 local cache = {}
 local ncache = 0
 
-function bigint(n)
+function new(n)
 	if cache[n] then
 		return cache[n]
 	end
@@ -457,7 +473,7 @@ function bigint(n)
 			sign = -1
 			start = 2
 		end
-		bi = bigint(0)
+		bi = new(0)
 		for i = start, #digits do
 			bi = addint(mulint(bi, 10), tonumber(digits[i]))
 		end
@@ -477,20 +493,18 @@ function bigint(n)
 	return bi
 end
 
-function new(n)
-	return bigint(n)
-end
-
-function safeNew(n)
-	local ok, result = pcall(bigint, n)
+-- safe way to create a new bigint. returns false if it fails
+function tryParse(n)
+	local ok, result = pcall(new, n)
 	if ok then return result end
 	return false
 end
 
-zero = bigint(0)
-one = bigint(1)
-two = bigint(2)
+zero = new(0)
+one = new(1)
+two = new(2)
 
+-- modular exponentation: base ^ exponent % modulus
 function modexp(base, exponent, modulus)
 	if modulus == 1 then return zero end
     local result = one
@@ -505,10 +519,12 @@ function modexp(base, exponent, modulus)
     return result
 end
 
+-- calculates the primitive root modulo p
+-- In modular arithmetic, a number g is a primitive root modulo p if every number a coprime to n is congruent to a power of g modulo p.
 function primitiveRoot(p, maxRoot)
-	if type(p) ~= "table" then p = bigint(p) end
+	if type(p) ~= "table" then p = new(p) end
 	if maxRoot then
-		if type(maxRoot) ~= "table" then maxRoot = bigint(maxRoot) end
+		if type(maxRoot) ~= "table" then maxRoot = new(maxRoot) end
 		if maxRoot >= p then maxRoot = p - one end
 	else
 		maxRoot = p - one
@@ -545,6 +561,7 @@ function primitiveRoot(p, maxRoot)
 	return false
 end
 
+-- returns a random number with a certain length
 function randomWithLength(length, cap)
 	if not cap then
 		cap = 999999999
@@ -555,29 +572,17 @@ function randomWithLength(length, cap)
 	while true do
 		randomString = randomString .. tostring(math.random(100000000, cap))
 		if #randomString >= length then
-			local finalRandom = randomString:sub(1, length)
-			if finalRandom:sub(-1, -1) == "2" then
-				return bigint(finalRandom:sub(1, -2) .. "3")
-			elseif finalRandom:sub(-1, -1) == "4" then
-				return bigint(finalRandom:sub(1, -2) .. "5")
-			elseif finalRandom:sub(-1, -1) == "6" then
-				return bigint(finalRandom:sub(1, -2) .. "7")
-			elseif finalRandom:sub(-1, -1) == "8" then
-				return bigint(finalRandom:sub(1, -2) .. "9")
-			elseif finalRandom:sub(-1, -1) == "0" then
-				return bigint(finalRandom:sub(1, -2) .. "1")
-			else
-				return bigint(finalRandom)
-			end
+			return new(randomString:sub(1, length))
 		end
 	end
 end
 
+-- returns a new random number between the given numbers
 function random(minNum, maxNum)
-	if type(minNum) == "string" or type(minNum) == "number" then minNum = bigint(minNum) end
-	if type(maxNum) == "string" or type(maxNum) == "number" then maxNum = bigint(maxNum) end
-	if maxNum < bigint(1000000000) then
-		return bigint(math.random(biginttonumber(minNum), biginttonumber(maxNum)))
+	if type(minNum) == "string" or type(minNum) == "number" then minNum = new(minNum) end
+	if type(maxNum) == "string" or type(maxNum) == "number" then maxNum = new(maxNum) end
+	if maxNum < new(1000000000) then
+		return new(math.random(biginttonumber(minNum), biginttonumber(maxNum)))
 	end
 
 	local maxString = tostring(maxNum)
@@ -600,13 +605,14 @@ function random(minNum, maxNum)
 	end
 end
 
+-- tests if the given number is a prime number
 local function isPrime(n)
 	if type(n) == "number" then
-		n = bigint(n)
+		n = new(n)
 	end
 
 	if n % 2 == zero then
-		return false
+		return n == two
 	end
 
 	local s, d = 0, n - one
@@ -615,11 +621,11 @@ local function isPrime(n)
 	end
 
 	for i = 1, 3 do
-		local a = random(bigint(2), n - 2)
+		local a = random(two, n - 2)
 		local x = modexp(a, d, n)
 		if x ~= one and x + 1 ~= n then
 			for j = 1, s do
-				x = modexp(x, bigint(2), n)
+				x = modexp(x, two, n)
 				if x == one then
 					return false
 				elseif x == n - 1 then
@@ -636,10 +642,12 @@ local function isPrime(n)
 	return true
 end
 
+-- return a large prime number of the given length
 function generateLargePrime(length)
 	local i = 0
 	while true do
-		local randomNumber = randomWithLength(length)
+		-- make an odd random number
+		local randomNumber = randomWithLength(length - 1) .. tostring(2 * math.random(0, 4) + 1)
 		if isPrime(randomNumber) then
 			return randomNumber
 		end

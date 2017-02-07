@@ -15,14 +15,9 @@ local function transmit(remote, msg)
 	end
 end
 
-local function forwardKey(self)
-	self.currentKey = self.stream:generate(16)
-end
-
 local function send(self, data)
 	data = textutils.serialize({arcnet = true, data = data})
-	data = AES.encryptStr(data, self.currentKey, self.iv)
-	self:forwardKey()
+	data = AES.encryptStr(data, self.sendStream:generate(16), self.iv)
 	transmit(self.remote, data)
 end
 
@@ -52,13 +47,12 @@ local function receive(self, timeout)
 end
 
 local function decrypt(self, msg)
-	msg = AES.decryptStr(msg, self.currentKey, self.iv)
+	msg = AES.decryptStr(msg, self.receiveStream:generate(16), self.iv)
 	msg = textutils.unserialize(msg)
 	if type(msg) ~= "table" or not msg.arcnet then
 		-- error
 		return false
 	end
-	self:forwardKey()
 	return true, msg.data
 end
 
@@ -98,12 +92,11 @@ local function completeChannel(channel, shared)
 	local iv = channel.secret
 	while #iv < 16 do iv = iv .. channel.secret end
 	channel.iv = AES.strToBlocks(iv)[1]
-	channel.stream = AES.newCTR(iv, iv)
+	channel.receiveStream = AES.newCTR(iv, iv)
+	channel.sendStream = AES.newCTR(iv, iv)
 	channel.send = send
 	channel.receive = receive
 	channel.decrypt = decrypt
-	channel.forwardKey = forwardKey
-	channel:forwardKey()
 	return channel
 end
 
@@ -112,7 +105,7 @@ function connect(remote, timeout)
 	transmit(remote, {shared = channel.shared})
 	local msg = receiveResponse(remote, timeout)
 	if msg and type(msg) == "table" and type(msg.shared) == "string" then
-		local shared = bigint.safeNew(msg.shared)
+		local shared = bigint.tryParse(msg.shared)
 		if shared then
 			return completeChannel(channel, shared)
 		end
@@ -126,15 +119,12 @@ function listen()
 		if modems[side] and port == os.getComputerID() then
 			if type(msg) == "table" then
 				if type(msg.shared) == "string" then -- some one has send us a shared key
-					local shared = bigint.safeNew(msg.shared)
+					local shared = bigint.tryParse(msg.shared)
 					if shared then
 						local channel = createChannel(reply)
 						completeChannel(channel, shared)
 						transmit(reply, {shared = channel.shared})
 						channels[reply] = channel
-						print("private: " .. tostring(channel.private))
-						print("shared: " .. tostring(channel.shared))
-						print("secret: " .. channel.secret)
 					end
 				end
 			elseif type(msg) == "string" then
